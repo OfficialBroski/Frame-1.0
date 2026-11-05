@@ -19,6 +19,10 @@ Die Archive und SHA-256-Dateien entstehen in `dist/`. Die Prüfung startet einen
 
 ## GitHub-Release
 
+**Mit den bereits fertigen Dateien:** Änderungsvorschlag im Repository übernehmen, dann **Releases → Draft a new release** öffnen. Den neuen Tag `v2.2.0` auf `main` auswählen, Titel `Frame 2.2` setzen, den Text aus `RELEASE-2.2.md` einfügen und die vier App-Archive samt Prüfsummen anhängen. Danach veröffentlichen. Der Tag-Workflow erkennt einen bereits angelegten Release und überschreibt ihn nicht.
+
+**Für spätere vollständig automatische Builds:**
+
 1. Die vollständige aktuelle Projektversion einschließlich `.github`, `resources`, `desktop.py` und `runtime_setup.py` übernehmen.
 2. Unter **Actions → Desktop apps → Run workflow** bei Bedarf die Builds vorab prüfen.
 3. Einen Tag **v2.2.0** auf den geprüften Commit setzen und pushen. Alternativ unter GitHub **Releases → Draft a new release** zunächst einen Tag erstellen; der vorbereitete Tag-Workflow erstellt anschließend den eigentlichen Release-Entwurf mit allen Dateien. Am einfachsten den Tag im Terminal oder mit GitHub Desktop pushen und den fertigen Workflow-Entwurf verwenden.

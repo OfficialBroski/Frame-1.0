@@ -45,4 +45,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --notes-file docs/RELEASE-2.2.md --title "Frame $RELEASE_TAG"
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists. Existing assets are preserved; built archives are available as workflow artifacts."
+          else
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --notes-file docs/RELEASE-2.2.md --title "Frame $RELEASE_TAG"
+          fi
