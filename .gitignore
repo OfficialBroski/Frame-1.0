@@ -1,0 +1,42 @@
+# Local runtime and personal media
+.runtime/
+.venv/
+venv/
+downloads/
+frame.local.json
+.env
+.env.*
+!.env.example
+*.log
+*.part
+*.ytdl
+*.mp3
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.opus
+*.wav
+*.flac
+
+# Generated packages and Python caches
+dist/
+build/
+*.zip
+*.sha256
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.coverage
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Release build environment and downloaded vendor tools
+.buildenv/
+.build-runtime/
+*.spec

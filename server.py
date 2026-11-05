@@ -17,7 +17,9 @@ import signal
 import subprocess
 import sys
 import threading
+import tempfile
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 import uuid
@@ -28,9 +30,14 @@ from formats import FORMATS, VERSION, download_options, validate_options
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("FRAME_DATA_DIR", str(ROOT / "downloads"))).resolve()
 JOBS: dict = {}
+BATCHES: dict = {}
+MAX_BATCH = 100
+MAX_QUEUED = 200
+ZIP_SLOT = threading.BoundedSemaphore(1)
 PROCESSES: dict = {}
 LOCK = threading.RLock()
 TOKEN = secrets.token_urlsafe(32)
+SETUP = {"message": "", "error": ""}
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 PORT = 8765
 INSPECT_SLOTS = threading.BoundedSemaphore(2)
@@ -81,13 +88,17 @@ def runtime_path():
         if separator and name in ("deno", "node") and Path(path).is_file() and supported_runtime(name, path):
             return name, path
     for name in ("deno", "node"):
-        path = shutil.which(name)
-        if path and supported_runtime(name, path):
-            return name, path
+        for path in (str(ROOT / ".runtime" / name / "bin" / name), shutil.which(name),
+                     f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}", str(Path.home() / ".deno/bin" / name)):
+            if path and Path(path).is_file() and supported_runtime(name, path):
+                return name, path
     return None, None
 
 
 def ffmpeg_path():
+    configured = os.environ.get("FRAME_FFMPEG")
+    if configured and Path(configured).is_file():
+        return configured
     if shutil.which("ffmpeg"):
         return shutil.which("ffmpeg")
     try:
@@ -105,7 +116,13 @@ def dependencies():
     js_name, _ = runtime_path()
     ffmpeg = ffmpeg_path()
     return {"ready": bool(version and ffmpeg and js_name), "version": VERSION, "formats": FORMATS, "yt_dlp": version,
-            "ffmpeg": bool(ffmpeg), "javascript": js_name, "download_folder": str(DATA)}
+            "ffmpeg": bool(ffmpeg), "javascript": js_name, "download_folder": str(DATA), "setup": dict(SETUP)}
+
+
+def worker_command(mode):
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--frame-worker" if mode == "--worker" else "--frame-inspect"]
+    return [sys.executable, str(ROOT / "server.py"), mode]
 
 
 class QuietLogger:
@@ -187,6 +204,7 @@ def download_worker(payload):
         info = data.get("info_dict", {})
         stream = "Audiospur" if audio or info.get("vcodec") == "none" else "Videospur"
         emit({"state": "downloading", "stage": stream + " wird geladen",
+              **({"title": info["title"]} if info.get("title") else {}),
               "progress": min(100, round(downloaded / total * 100, 1)) if total else None,
               "downloaded": downloaded, "total": total, "speed": data.get("speed"), "eta": data.get("eta")})
         if status == "finished":
@@ -213,9 +231,17 @@ def save_jobs():
     temporary = DATA / ".history.tmp"
     temporary.write_text(json.dumps(JOBS, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(DATA / ".history.json")
+    temporary = DATA / ".batches.tmp"
+    temporary.write_text(json.dumps(BATCHES, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(DATA / ".batches.json")
 
 
 def load_jobs():
+    try:
+        stored = json.loads((DATA / ".batches.json").read_text(encoding="utf-8"))
+        BATCHES.update({key: batch for key, batch in stored.items() if re.fullmatch(r"[a-f0-9]{32}", key)})
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     try:
         stored = json.loads((DATA / ".history.json").read_text(encoding="utf-8"))
         for key, job in stored.items():
@@ -228,19 +254,71 @@ def load_jobs():
         pass
 
 
+def batch_urls(value):
+    lines = value.splitlines() if isinstance(value, str) else value
+    if not isinstance(lines, list) or not 1 <= len(lines) <= MAX_BATCH:
+        raise ValueError(f"Bitte füge 1 bis {MAX_BATCH} Links ein, einen pro Zeile.")
+    urls = []
+    duplicates = 0
+    for index, line in enumerate(lines, 1):
+        if isinstance(line, str) and not line.strip():
+            continue
+        try:
+            url = youtube_url(line)
+        except ValueError as error:
+            raise ValueError(f"Zeile {index}: {error}") from error
+        if url in urls:
+            duplicates += 1
+        else:
+            urls.append(url)
+    if not urls:
+        raise ValueError("Bitte füge mindestens einen YouTube-Link ein.")
+    return urls, duplicates
+
+
+def new_job(url, selected, title="YouTube-Video", batch_id=None):
+    job = {"id": uuid.uuid4().hex, "url": url, **selected, "created": time.time(),
+           "state": "queued", "stage": "In der Warteschlange", "progress": None, "title": title}
+    if batch_id:
+        job["batch_id"] = batch_id
+    JOBS[job["id"]] = job
+    return job
+
+
+def completed_file(job):
+    if job.get("state") != "done" or not job.get("file"):
+        return None
+    folder = (DATA / job["id"]).resolve()
+    file = (folder / job["file"]).resolve()
+    return file if folder.parent == DATA.resolve() and file.parent == folder and file.is_file() else None
+
+
+def batch_summary(batch):
+    items = [JOBS[key] for key in batch["jobs"] if key in JOBS]
+    counts = {state: sum(j["state"] == state for j in items) for state in ("done", "error", "cancelled")}
+    active = sum(j["state"] in ("queued", "downloading", "processing") for j in items)
+    return {**batch, **counts, "total": len(batch["jobs"]), "active": active,
+            "zip_ready": bool(counts["done"] and not active)}
+
+
 def cleanup_partial(job_id):
     folder = DATA / job_id
     if folder.is_dir():
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def execute_job(job_id):
+def submit_job(job):
+    job["attempt"] = uuid.uuid4().hex
+    POOL.submit(execute_job, job["id"], job["attempt"])
+
+
+def execute_job(job_id, attempt):
     with LOCK:
-        job = JOBS[job_id]
-        if job["state"] == "cancelled":
+        job = JOBS.get(job_id)
+        if not job or job["state"] != "queued" or job.get("attempt") != attempt:
             return
         job.update(state="downloading", stage="Verbindung zu YouTube wird aufgebaut")
-        proc = subprocess.Popen([sys.executable, str(ROOT / "server.py"), "--worker"],
+        proc = subprocess.Popen(worker_command("--worker"),
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", start_new_session=os.name != "nt")
         PROCESSES[job_id] = proc
@@ -317,6 +395,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/jobs":
             with LOCK:
                 return self.send_data(sorted(JOBS.values(), key=lambda j: j["created"], reverse=True))
+        if path == "/api/batches":
+            with LOCK:
+                return self.send_data([batch_summary(b) for b in sorted(BATCHES.values(), key=lambda b: b["created"], reverse=True)])
+        match = re.fullmatch(r"/api/batches/([a-f0-9]{32})/zip", path)
+        if match:
+            if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                return self.send_data({"error": "Dieser Zugriff ist nicht erlaubt."}, 403)
+            return self.send_batch_zip(match[1])
         match = re.fullmatch(r"/api/files/([a-f0-9]{32})", path)
         if match:
             with LOCK:
@@ -342,6 +428,51 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_data(file.read_bytes(), content_type=(mimetypes.guess_type(file.name)[0] or "text/plain") + "; charset=utf-8")
         return self.send_data({"error": "Nicht gefunden."}, 404)
 
+    def send_batch_zip(self, batch_id):
+        with LOCK:
+            batch = BATCHES.get(batch_id)
+            if not batch:
+                return self.send_data({"error": "Paket nicht gefunden."}, 404)
+            summary = batch_summary(batch)
+            if not summary["zip_ready"]:
+                return self.send_data({"error": "Bitte warte, bis das Paket beendet ist. Mindestens eine Datei muss fertig sein."}, 409)
+            files = [(index, completed_file(JOBS.get(key, {}))) for index, key in enumerate(batch["jobs"], 1)]
+            if sum(file is not None for _, file in files) != summary["done"]:
+                return self.send_data({"error": "Eine fertige Datei wurde verschoben oder gelöscht. Bitte lade sie erneut herunter."}, 409)
+            manifest = {"files": [{"url": JOBS[key]["url"], "state": JOBS[key]["state"],
+                                    "title": JOBS[key]["title"], "error": JOBS[key].get("error")}
+                                   for key in batch["jobs"] if key in JOBS]}
+        if not ZIP_SLOT.acquire(blocking=False):
+            return self.send_data({"error": "Ein ZIP wird bereits vorbereitet. Bitte warte einen Moment."}, 429)
+        headers_sent = False
+        try:
+            # Disk-backed ZIP64: large packages never accumulate in RAM; removed after delivery.
+            with tempfile.TemporaryFile(dir=DATA) as temporary:
+                with zipfile.ZipFile(temporary, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
+                    for index, file in files:
+                        if file:
+                            archive.write(file, f"{index:03d} - {file.name}")
+                    archive.writestr("Paket-Info.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+                size = temporary.tell()
+                temporary.seek(0)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(size))
+                self.send_header("Content-Disposition", f'attachment; filename="Frame-Paket-{batch_id[:8]}.zip"')
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                headers_sent = True
+                with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                    shutil.copyfileobj(temporary, self.wfile, length=1024 * 1024)
+        except OSError:
+            # Before headers, report disk/missing-file errors as a normal API response.
+            if headers_sent:
+                self.close_connection = True
+            else:
+                self.send_data({"error": "Das ZIP konnte nicht erstellt werden. Bitte prüfe den freien Speicherplatz und die Dateien."}, 507)
+        finally:
+            ZIP_SLOT.release()
+
     def do_POST(self):
         if not self.local_request() or self.headers.get("X-Frame-Token") != TOKEN:
             return self.send_data({"error": "Bitte lade die Seite erneut."}, 403)
@@ -350,12 +481,75 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_data({"error": "Dieser Zugriff ist nicht erlaubt."}, 403)
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 4096:
+            if not 0 < length <= 262144:
                 raise ValueError("Die Anfrage ist ungültig.")
             data = json.loads(self.rfile.read(length))
             if not isinstance(data, dict):
                 raise ValueError("Die Anfrage ist ungültig.")
             path = urlparse(self.path).path
+            if path == "/api/setup/retry":
+                if not getattr(sys, "frozen", False):
+                    return self.send_data({"error": "Bitte aktualisiere die Werkzeuge über den Frame-Starter."}, 400)
+                from runtime_setup import start_setup
+                start_setup(SETUP)
+                return self.send_data({"starting": True}, 202)
+            if path == "/api/shutdown":
+                with LOCK:
+                    if any(j["state"] in ("queued", "downloading", "processing") for j in JOBS.values()):
+                        return self.send_data({"error": "Es laufen noch Downloads. Bitte warte oder brich sie zuerst ab."}, 409)
+                self.send_data({"stopping": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            if path == "/api/batches":
+                urls, duplicates = batch_urls(data.get("urls"))
+                selected = validate_options(data)
+                if not dependencies()["ready"]:
+                    return self.send_data({"error": "Die Download-Werkzeuge fehlen. Bitte starte Start.command."}, 503)
+                with LOCK:
+                    active = sum(j["state"] in ("queued", "downloading", "processing") for j in JOBS.values())
+                    if active + len(urls) > MAX_QUEUED:
+                        return self.send_data({"error": f"Maximal {MAX_QUEUED} Downloads dürfen gleichzeitig vorgemerkt sein. Bitte warte kurz."}, 429)
+                    batch_id = uuid.uuid4().hex
+                    items = [new_job(url, selected, f"Video {index}", batch_id) for index, url in enumerate(urls, 1)]
+                    batch = {"id": batch_id, "created": time.time(), "jobs": [j["id"] for j in items],
+                             "delivery": data.get("delivery", "files") if data.get("delivery") in ("files", "zip") else "files",
+                             "duplicates": duplicates, **selected}
+                    BATCHES[batch_id] = batch
+                    for job in items:
+                        submit_job(job)
+                    save_jobs()
+                    return self.send_data(batch_summary(batch), 202)
+            match = re.fullmatch(r"/api/batches/([a-f0-9]{32})/(cancel|retry|remove)", path)
+            if match:
+                with LOCK:
+                    batch = BATCHES.get(match[1])
+                    if not batch:
+                        return self.send_data({"error": "Paket nicht gefunden."}, 404)
+                    items = [JOBS[key] for key in batch["jobs"] if key in JOBS]
+                    action = match[2]
+                    if action == "cancel":
+                        for job in items:
+                            if job["state"] in ("queued", "downloading", "processing"):
+                                job.update(state="cancelled", stage="Abgebrochen")
+                                if job["id"] in PROCESSES:
+                                    stop_process(PROCESSES[job["id"]])
+                    else:
+                        if batch_summary(batch)["active"] or any(j["id"] in PROCESSES for j in items):
+                            return self.send_data({"error": "Bitte warte, bis das Paket beendet ist."}, 409)
+                        if action == "remove":
+                            for job in items:
+                                JOBS.pop(job["id"])
+                            BATCHES.pop(batch["id"])
+                        else:
+                            retry = [j for j in items if j["state"] in ("error", "cancelled")]
+                            if sum(j["state"] in ("queued", "downloading", "processing") for j in JOBS.values()) + len(retry) > MAX_QUEUED:
+                                return self.send_data({"error": "Die Warteschlange ist voll. Bitte warte kurz."}, 429)
+                            for job in retry:
+                                job.pop("error", None)
+                                job.update(state="queued", stage="In der Warteschlange", progress=None, speed=None, eta=None)
+                                submit_job(job)
+                    save_jobs()
+                    return self.send_data({"removed": True} if action == "remove" else batch_summary(batch))
             if path == "/api/inspect":
                 url = youtube_url(data.get("url"))
                 if not dependencies()["ready"]:
@@ -363,7 +557,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not INSPECT_SLOTS.acquire(blocking=False):
                     return self.send_data({"error": "Es laufen bereits zwei Videoabfragen. Bitte warte einen Moment."}, 429)
                 try:
-                    result = subprocess.run([sys.executable, str(ROOT / "server.py"), "--inspect"],
+                    result = subprocess.run(worker_command("--inspect"),
                                             input=json.dumps({"url": url}), capture_output=True, text=True,
                                             encoding="utf-8", timeout=90)
                     response = json.loads(result.stdout)
@@ -376,15 +570,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not dependencies()["ready"]:
                     return self.send_data({"error": "Die Download-Werkzeuge fehlen. Bitte starte Start.command."}, 503)
                 with LOCK:
-                    if sum(j["state"] in ("queued", "downloading", "processing") for j in JOBS.values()) >= 5:
+                    if sum(j["state"] in ("queued", "downloading", "processing") for j in JOBS.values()) >= MAX_QUEUED:
                         return self.send_data({"error": "Deine Warteschlange ist voll. Bitte warte, bis ein Download fertig ist."}, 429)
                     job_id = uuid.uuid4().hex
                     job = {"id": job_id, "url": url, **selected,
                            "created": time.time(), "state": "queued", "stage": "In der Warteschlange", "progress": None,
                            "title": str(data.get("title", "YouTube-Video"))[:300]}
                     JOBS[job_id] = job
+                    submit_job(job)
                     save_jobs()
-                    POOL.submit(execute_job, job_id)
                     return self.send_data(dict(job), 202)
             match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/cancel", path)
             if match:
@@ -406,6 +600,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_data({"error": "Download nicht gefunden."}, 404)
                     if job["state"] not in ("done", "error", "cancelled") or match[1] in PROCESSES:
                         return self.send_data({"error": "Bitte warte, bis der Download beendet ist."}, 409)
+                    if job.get("batch_id") in BATCHES:
+                        return self.send_data({"error": "Bitte entferne das gesamte Paket aus dem Verlauf. Die Dateien bleiben erhalten."}, 409)
                     JOBS.pop(match[1])
                     save_jobs()
                     return self.send_data({"removed": True})
@@ -418,14 +614,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_data({"error": "Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut."}, 500)
 
 
-def main():
+def main(argv=None):
     global PORT
     parser = argparse.ArgumentParser(description="Frame – YouTube-Downloader im Browser")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open", action="store_true")
     parser.add_argument("--inspect", action="store_true")
     parser.add_argument("--worker", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.inspect or args.worker:
         try:
             payload = json.load(sys.stdin)

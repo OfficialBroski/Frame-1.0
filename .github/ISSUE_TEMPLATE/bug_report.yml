@@ -1,0 +1,31 @@
+name: Fehler melden
+description: Ein Download oder die Oberfläche funktioniert nicht wie erwartet.
+title: "[Fehler] "
+body:
+  - type: markdown
+    attributes:
+      value: "Bitte keine privaten Links, Zugangsdaten oder Download-Verläufe anhängen."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Was passiert?
+      description: Erwartetes und tatsächliches Verhalten sowie Schritte zum Nachstellen.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System und Frame-Version
+      placeholder: "Zum Beispiel: macOS 15, Frame 2.0.0, Python 3.12"
+    validations:
+      required: true
+  - type: input
+    id: format
+    attributes:
+      label: Format und Qualität
+      placeholder: "Zum Beispiel: MP3, 320 kbit/s"
+  - type: textarea
+    id: error
+    attributes:
+      label: Fehlermeldung
+      description: Persönliche Pfade und vertrauliche Angaben vorher entfernen.

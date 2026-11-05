@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 let token = "", currentVideo = null, jobs = [], connected = false, polling = false, inspecting = false;
-let catalog = [], mode = "video";
+let catalog = [], mode = "video", batches = [], scope = "single", batchSubmitting = false;
 const activeStates = new Set(["queued", "downloading", "processing"]);
 const icons = (name) => { const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); const use = document.createElementNS(svg.namespaceURI, "use"); use.setAttribute("href", `#i-${name}`); svg.append(use); return svg; };
 const text = (tag, className, content) => { const el = document.createElement(tag); el.className = className; el.textContent = content; return el; };
@@ -23,6 +23,7 @@ function setConnection(online) {
   updateAvailability();
 }
 function updateAvailability() {
+  $("batch-options").disabled = !connected || batchSubmitting;
   $("download-options").disabled = !connected || !currentVideo || inspecting || (mode === "audio" && currentVideo.has_audio === false);
 }
 function renderOptions(resetQuality = false) {
@@ -66,12 +67,12 @@ async function health() {
     catalog = state.formats || [];
     setConnection(state.ready);
     $("connection-label").textContent = state.ready ? "Lokal verbunden" : "Einrichtung erforderlich";
-    message("service-notice", state.ready ? "" : "Die Download-Werkzeuge sind noch nicht vollständig eingerichtet. Bitte starte Frame mit Start.command.");
+    message("service-notice", state.ready ? "" : state.setup?.error || state.setup?.message || "Die Download-Werkzeuge sind noch nicht vollständig eingerichtet. Bitte starte Frame mit Start.command.");
     const info = $("system-info"); info.replaceChildren();
     info.append(text("strong", "", "Dein lokales System"), document.createElement("br"));
     info.append(document.createTextNode(`yt-dlp ${state.yt_dlp || "fehlt"} · FFmpeg ${state.ffmpeg ? "bereit" : "fehlt"} · ${state.javascript || "JavaScript-Laufzeit fehlt"}`), document.createElement("br"));
     info.append(document.createTextNode(`Download-Ordner: ${state.download_folder}`));
-    renderOptions();
+    renderOptions(); renderBatchOptions();
     return state.ready;
   } catch (error) {
     setConnection(false); message("service-notice", niceError(error));
@@ -141,10 +142,10 @@ function jobCard(job) {
   if (job.state === "done") { const save = document.createElement("a"); save.className = "job-button"; save.href = `/api/files/${job.id}`; save.download = ""; save.append(icons("download"), document.createTextNode("Datei speichern")); actions.append(save); }
   else if (activeStates.has(job.state)) {
     const cancel = text("button", "job-button cancel", "Abbrechen"); cancel.addEventListener("click", async () => { cancel.disabled = true; try { await api(`/api/jobs/${job.id}/cancel`, {}); await refreshJobs(); } catch (error) { toast(niceError(error)); cancel.disabled = false; } }); actions.append(cancel);
-  } else {
+  } else if (!job.batch_id) {
     const retry = text("button", "job-button", "Erneut versuchen"); retry.addEventListener("click", async () => { retry.disabled = true; try { await api("/api/jobs", { url: job.url, quality: job.quality, audio_quality: job.audio_quality || "best", mode: job.mode || "video", container: job.container, title: job.title }); await refreshJobs(); } catch (error) { toast(niceError(error)); retry.disabled = false; } }); actions.append(retry);
   }
-  if (!activeStates.has(job.state)) {
+  if (!activeStates.has(job.state) && !job.batch_id) {
     const remove = text("button", "job-button cancel", ""); remove.append(icons("close")); remove.title = "Aus Verlauf entfernen (Datei bleibt erhalten)"; remove.setAttribute("aria-label", `Aus Verlauf entfernen: ${job.title}`);
     remove.addEventListener("click", async () => { remove.disabled = true; try { await api(`/api/jobs/${job.id}/remove`, {}); await refreshJobs(); toast("Aus dem Verlauf entfernt. Deine Datei bleibt erhalten."); } catch (error) { toast(niceError(error)); remove.disabled = false; } }); actions.append(remove);
   }
@@ -158,14 +159,22 @@ function replaceJobList(id, list) {
 }
 function renderJobs() {
   $("download-count").textContent = jobs.length;
-  $("recent-count").textContent = jobs.length ? `(${jobs.length})` : "";
-  replaceJobList("recent-jobs", jobs.slice(0, 3)); replaceJobList("all-jobs", jobs);
+  const singles = jobs.filter(j => !j.batch_id);
+  $("recent-count").textContent = singles.length ? `(${singles.length})` : "";
+  $("recent-single-section").hidden = !singles.length && !!batches.length;
+  $("all-jobs").hidden = !singles.length && !!batches.length;
+  replaceJobList("recent-jobs", jobs.filter(j => !j.batch_id).slice(0, 3)); replaceJobList("all-jobs", jobs.filter(j => !j.batch_id));
+  renderBatches();
   const done = jobs.filter(j => j.state === "done").length, running = jobs.filter(j => activeStates.has(j.state)).length;
   $("download-summary").textContent = `${jobs.length} Downloads · ${done} abgeschlossen${running ? ` · ${running} aktiv` : ""}`;
 }
 async function refreshJobs() {
   if (polling) return; polling = true;
-  try { const next = await api("/api/jobs", null, 5000); if (JSON.stringify(next) !== JSON.stringify(jobs)) { jobs = next; renderJobs(); } if (!connected) await health(); }
+  try {
+    const [next, nextBatches] = await Promise.all([api("/api/jobs", null, 5000), api("/api/batches", null, 5000)]);
+    if (JSON.stringify(next) !== JSON.stringify(jobs) || JSON.stringify(nextBatches) !== JSON.stringify(batches)) { jobs = next; batches = nextBatches; renderJobs(); }
+    if (!connected) await health();
+  }
   catch { if (connected) { setConnection(false); message("service-notice", "Die Verbindung zu Frame wurde unterbrochen. Bitte prüfe, ob das Startfenster noch geöffnet ist."); } }
   finally { polling = false; }
 }
@@ -175,4 +184,108 @@ function openHelp() { health(); $("help-dialog").showModal(); }
 $("help-button").addEventListener("click", openHelp); $("connection-button").addEventListener("click", openHelp); $("close-help").addEventListener("click", () => $("help-dialog").close());
 $("help-dialog").addEventListener("click", event => { if (event.target === $("help-dialog")) { const bounds = event.target.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) event.target.close(); } });
 $("thumbnail").addEventListener("error", () => { $("thumbnail-wrap").hidden = true; $("preview-art").hidden = false; });
+
+
+function setScope(value) {
+  scope = value;
+  $("single-download").hidden = value !== "single";
+  $("batch-download").hidden = value !== "batch";
+  for (const name of ["single", "batch"]) { $("scope-" + name).classList.toggle("active", value === name); $("scope-" + name).setAttribute("aria-pressed", String(value === name)); }
+  $("recent-batches-section").hidden = !batches.length;
+}
+function batchLines() { return $("batch-urls").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean); }
+function updateBatchCount() { const count = batchLines().length; $("batch-count").textContent = `${count} ${count === 1 ? "Link" : "Links"} eingefügt · maximal 100`; }
+function renderBatchOptions(reset = false) {
+  const format = $("batch-format"), previousFormat = format.value, quality = $("batch-quality"), previousQuality = quality.value;
+  format.replaceChildren(...catalog.map(item => new Option(`${item.label} · ${item.kind === "video" ? "Video" : "Audio"}`, item.id)));
+  if (catalog.some(item => item.id === previousFormat)) format.value = previousFormat;
+  const selected = catalog.find(item => item.id === format.value);
+  if (!selected) return;
+  quality.replaceChildren();
+  $("batch-quality-label").textContent = selected.kind === "video" ? "Videoqualität für alle" : "Audioqualität für alle";
+  if (selected.kind === "video") {
+    quality.append(new Option("Beste je Video", "best"));
+    for (const h of [4320,2160,1440,1080,720,480,360,240,144]) quality.append(new Option(`Bis ${h}p${h === 2160 ? " · 4K" : h === 1080 ? " · Full HD" : ""}`, String(h)));
+    $("batch-quality-hint").textContent = "Die Auflösung gilt als Obergrenze für alle Videos. Bei geringerer Quellqualität wird die beste passende Spur geladen. Kein Hochskalieren.";
+  } else {
+    for (const q of selected.qualities) quality.append(new Option(q === "best" ? "Beste Quellqualität" : `${q} kbit/s`, q));
+    $("batch-quality-hint").textContent = selected.id === "mp3" ? "Die gewählte Bitrate gilt als Ausgabeziel für alle Dateien. Die Quelle bestimmt die Tonqualität." : selected.description + ". Die Qualität der Quelle wird nicht verbessert.";
+  }
+  if (!reset && [...quality.options].some(item => item.value === previousQuality)) quality.value = previousQuality;
+  updateAvailability();
+}
+function packageCard(batch) {
+  const card = text("article", "batch-card", ""), audio = batch.mode === "audio";
+  const quality = audio ? (batch.audio_quality === "best" ? "Quellqualität" : `${batch.audio_quality} kbit/s`) : batch.quality === "best" ? "Beste je Video" : `bis ${batch.quality}p`;
+  card.append(text("h3", "", `Paket · ${batch.total} ${batch.total === 1 ? "Datei" : "Dateien"}`));
+  card.append(text("div", "job-meta", `${batch.container.toUpperCase()} · ${quality} · ${new Date(batch.created * 1000).toLocaleString("de-DE")} · ${batch.delivery === "zip" ? "ZIP-Paket" : "Einzeldateien"}`));
+  const settled = batch.done + batch.error + batch.cancelled;
+  const status = `${batch.done} von ${batch.total} fertig${batch.active ? ` · ${batch.active} in Arbeit / Warteschlange` : ""}${batch.error ? ` · ${batch.error} fehlgeschlagen` : ""}${batch.cancelled ? ` · ${batch.cancelled} abgebrochen` : ""}`;
+  card.append(text("p", "batch-status", status));
+  const progress = document.createElement("progress"); progress.className = "job-progress"; progress.max = batch.total; progress.value = settled; progress.setAttribute("aria-label", status); card.append(progress);
+  const actions = text("div", "job-actions", "");
+  if (batch.zip_ready) {
+    const zip = text("a", "job-button", batch.error || batch.cancelled ? `ZIP mit ${batch.done} ${batch.done === 1 ? "fertiger Datei" : "fertigen Dateien"} speichern` : batch.delivery === "zip" ? "ZIP-Paket speichern" : "Optional als ZIP speichern");
+    zip.href = `/api/batches/${batch.id}/zip`; zip.download = "";
+    zip.addEventListener("click", () => toast("Das ZIP wird vorbereitet. Bei großen Paketen kann das etwas dauern.")); actions.append(zip);
+  }
+  function action(label, operation, className = "") {
+    const button = text("button", `job-button ${className}`, label);
+    button.addEventListener("click", async () => { button.disabled = true; try { await api(`/api/batches/${batch.id}/${operation}`, {}); await refreshJobs(); if (operation === "remove") toast("Paket aus dem Verlauf entfernt. Deine Dateien bleiben erhalten."); } catch (error) { toast(niceError(error)); button.disabled = false; } });
+    actions.append(button);
+  }
+  if (batch.active) action("Paket abbrechen", "cancel", "cancel");
+  else { if (batch.error || batch.cancelled) action("Fehlende erneut laden", "retry"); action("Aus Verlauf entfernen", "remove", "cancel"); }
+  card.append(actions);
+  if (!batch.active && (batch.error || batch.cancelled)) card.append(text("p", "format-description", "Das ZIP enthält nur fertige Dateien. Paket-Info.json führt alle Ergebnisse auf."));
+  const details = document.createElement("details"); details.dataset.batch = batch.id;
+  details.append(text("summary", "", "Einzeldateien & Fortschritt anzeigen"));
+  const list = text("div", "jobs-list", "");
+  const byId = new Map(jobs.map(job => [job.id, job]));
+  for (const key of batch.jobs) { const job = byId.get(key); if (job) list.append(jobCard(job)); }
+  details.append(list); card.append(details); return card;
+}
+function renderBatches() {
+  $("recent-batches-section").hidden = !batches.length;
+  for (const id of ["recent-batches", "all-batches"]) {
+    const container = $(id), expanded = new Map([...container.querySelectorAll("details")].map(el => [el.dataset.batch, el.open]));
+    const focus = document.activeElement, focused = container.contains(focus) ? focus : null;
+    const focusBatch = focused?.closest(".batch-card")?.querySelector("details")?.dataset.batch;
+    const focusIndex = focused ? [...focused.closest(".batch-card").querySelectorAll("button,a,summary")].indexOf(focused) : -1;
+    container.replaceChildren(...batches.map(packageCard));
+    for (const detail of container.querySelectorAll("details")) {
+      detail.open = expanded.has(detail.dataset.batch) ? expanded.get(detail.dataset.batch) : batches.find(b => b.id === detail.dataset.batch)?.delivery === "files";
+      if (detail.dataset.batch === focusBatch && focusIndex >= 0) detail.closest(".batch-card").querySelectorAll("button,a,summary")[focusIndex]?.focus({preventScroll:true});
+    }
+  }
+}
+$("scope-single").addEventListener("click", () => setScope("single"));
+$("scope-batch").addEventListener("click", () => setScope("batch"));
+$("batch-urls").addEventListener("input", () => { updateBatchCount(); message("batch-error", ""); });
+$("batch-format").addEventListener("change", () => renderBatchOptions(true));
+$("batch-paste").addEventListener("click", async () => { try { const value = await navigator.clipboard.readText(); $("batch-urls").value = [$("batch-urls").value.trim(), value.trim()].filter(Boolean).join("\n"); updateBatchCount(); } catch { toast("Bitte füge die Links mit ⌘V oder Strg+V ein."); } $("batch-urls").focus(); });
+$("batch-form").addEventListener("submit", async event => {
+  event.preventDefault(); if (batchSubmitting) return;
+  message("batch-error", "");
+  const urls = batchLines();
+  if (!urls.length || urls.length > 100) { message("batch-error", "Bitte füge 1 bis 100 Links ein, einen pro Zeile."); return; }
+  if (!connected && !(await health())) return;
+  const selected = catalog.find(item => item.id === $("batch-format").value);
+  const payload = { urls, container: selected.id, mode: selected.kind, quality: selected.kind === "video" ? $("batch-quality").value : "best", audio_quality: selected.kind === "audio" ? $("batch-quality").value : "best", delivery: $("batch-delivery").value };
+  batchSubmitting = true; updateAvailability();
+  $("batch-start").querySelector("span").textContent = "Paket wird angelegt …";
+  try {
+    const batch = await api("/api/batches", payload);
+    batches.unshift(batch); renderBatches(); await refreshJobs();
+    $("batch-urls").value = ""; updateBatchCount();
+    toast(`${batch.total} Downloads vorgemerkt.${batch.duplicates ? ` ${batch.duplicates} doppelte Links übersprungen.` : ""}`);
+    $("recent-batches-section").scrollIntoView({behavior:"smooth", block:"start"});
+  } catch (error) { message("batch-error", niceError(error)); }
+  finally { batchSubmitting = false; updateAvailability(); $("batch-start").querySelector("span").textContent = "Paket herunterladen"; }
+});
 renderJobs(); health().then(refreshJobs); setInterval(refreshJobs, 1500);
+
+$("stop-service").addEventListener("click", async () => {
+  try { await api("/api/shutdown", {}); $("help-dialog").close(); setConnection(false); toast("Frame ist beendet. Zum Starten die Frame-App erneut öffnen."); }
+  catch (error) { toast(niceError(error)); }
+});

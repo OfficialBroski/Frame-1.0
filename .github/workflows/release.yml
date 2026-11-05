@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+  desktop:
+    needs: verify
+    uses: ./.github/workflows/desktop.yml
+  package:
+    needs: [verify, desktop]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python -c "import os; from formats import VERSION; assert os.environ['RELEASE_TAG'] == 'v' + VERSION, 'Tag must match formats.py VERSION'"
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: Frame-*
+          path: dist
+          merge-multiple: true
+      - run: python tools/package.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frame-complete-release
+          path: dist/*
+          if-no-files-found: error
+      - name: Create release draft with all platform downloads
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists. Existing assets are preserved; built archives are available as workflow artifacts."
+          else
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --draft --notes-file docs/RELEASE-2.2.md --title "Frame $RELEASE_TAG"
+          fi
