@@ -91,6 +91,20 @@ def main():
                         urllib.request.urlopen(base+'/api/health',timeout=.3).close()
                         time.sleep(.1)
                     except OSError: break
+                if os.name == 'nt':
+                    # Closing the HTTP listener precedes Python/bootloader exit.
+                    # Wait for the inherited log handle before deleting test data.
+                    log=folder/'config/server.log'
+                    for _ in range(100):
+                        try:
+                            closed=log.with_suffix('.closed')
+                            log.rename(closed)
+                            closed.rename(log)
+                            break
+                        except PermissionError:
+                            time.sleep(.1)
+                    else:
+                        raise AssertionError('Server did not release its log after shutdown')
 
 
 if __name__=='__main__': main()
