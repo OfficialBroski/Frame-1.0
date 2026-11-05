@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/banner.svg" alt="Frame — Video & Audio. Direkt zu dir." width="900"></p>
 
 <p align="center"><strong>Ein lokaler YouTube-Downloader mit einer klaren Dark-Oberfläche.</strong><br>Video in Originalqualität. Audio in deinem Wunschformat. Alles auf deinem Rechner.</p>
-<p align="center">Python 3.11+ · macOS / Windows / Linux · MIT · Version 2.0.0</p>
+<p align="center">Python 3.11+ · macOS / Windows / Linux · MIT · Version 2.2.0</p>
 
 **[Schnellstart](#schnellstart)** · **[Formate](#formate)** · **[Probleme lösen](#probleme-lösen)** · **[Auf GitHub veröffentlichen](docs/GITHUB.md)** · **[Mitentwickeln](CONTRIBUTING.md)**
 
@@ -11,8 +11,17 @@
 - Tatsächlich verfügbare Auflösungen wählen, bis 4K und höher, wenn die Quelle sie anbietet.
 - **Video:** MP4, MKV und WebM mit Bild und Ton.
 - **Audio:** MP3, M4A, Opus, WAV und FLAC. MP3 mit 96–320 kbit/s.
-- Zwei Downloads gleichzeitig, Warteschlange, Fortschritt, Abbrechen und erneuter Versuch.
+- **Paketdownload:** bis zu 100 Links einfügen, gemeinsame Qualität und Format wählen, einzeln oder als ZIP speichern.
+- Zwei Downloads gleichzeitig, bis zu 200 vorgemerkte Aufträge, Fortschritt, Abbrechen und erneuter Versuch.
 - Gespeicherter Verlauf und fertige Dateien ohne Konto, Werbung oder Telemetrie.
+
+## Fertige App herunterladen
+
+Unter **[Releases](https://github.com/OfficialBroski/Frame-1.0/releases)** die Datei für dein Betriebssystem wählen: macOS Apple Silicon, macOS Intel, Windows x64 oder Linux x64. Archiv vollständig entpacken, dann `Frame.app`, `Frame.exe` beziehungsweise `Frame` öffnen. Python und Node.js sind in den Desktop-Ausgaben enthalten. Beim ersten Start lädt Frame die Medienwerkzeuge automatisch; eine Internetverbindung ist nötig. Die Website öffnet sich im Standardbrowser, der lokale Server startet automatisch.
+
+Desktop-Ausgaben speichern unter `Downloads/Frame-Medien`. Mac-Apps lassen sich in Programme ablegen und zum Dock hinzufügen. Die Apps sind noch nicht öffentlich signiert/notarisiert. Einzelheiten und Systemvoraussetzungen stehen in [den Release-Hinweisen](docs/RELEASE-2.2.md).
+
+Die folgende Anleitung gilt für die **Quellcode-Ausgabe**. Native Builds und der Release-Workflow sind in [DESKTOP-BUILD.md](docs/DESKTOP-BUILD.md) beschrieben.
 
 ## Schnellstart
 
@@ -46,6 +55,20 @@ macOS kann für heruntergeladene Skripte eine Freigabe verlangen. Als Alternativ
 
 Die fertige Datei liegt bereits unter `downloads/<Auftrags-ID>/`. **Datei speichern** erstellt über den Browser eine zusätzliche Kopie an einem Ort deiner Wahl. Das × entfernt einen Verlaufseintrag und behält die Datei auf der Festplatte.
 
+## Mehrere Videos als Paket laden
+
+1. **Mehrere Links / Paket** öffnen.
+2. Pro Zeile einen YouTube-Link einfügen (maximal 100). Doppelte Video-IDs werden übersprungen.
+3. Ein Format und eine Qualität für alle wählen. Auch reine Audio-Pakete, beispielsweise MP3 mit 192 kbit/s, sind möglich.
+4. **Einzelne Dateien** oder **Ein ZIP-Paket** wählen und **Paket herunterladen** anklicken.
+5. Unter **Einzeldateien & Fortschritt anzeigen** den Verlauf verfolgen. Die Dateien liegen nach Abschluss bereits im lokalen Download-Ordner. **ZIP-Paket speichern** lädt sie zusammen als ZIP an deinen Wunschort; Einzeldateien lassen sich dort ebenfalls speichern.
+
+Die Auflösung gilt als Obergrenze je Video. Frame verwendet die beste vorhandene Spur bis zu dieser Grenze. Videos mit geringerer Quellqualität werden nicht hochskaliert. Ist kein passendes Format vorhanden, erscheint ein Fehler für dieses Video.
+
+Ein einzelner Fehler stoppt das Paket nicht. **Fehlende erneut laden** versucht nur fehlgeschlagene oder abgebrochene Videos erneut. Ein ZIP ist verfügbar, wenn alle Aufträge beendet sind und mindestens eine Datei fertig ist. Bei Teilerfolg enthält es die fertigen Dateien und `Paket-Info.json` mit allen Ergebnissen. Ein Paketabbruch behält bereits fertige Dateien.
+
+ZIPs werden mit ZIP64-Unterstützung auf der Festplatte vorbereitet und nach der Übertragung automatisch entfernt. Plane zusätzlichen freien Speicher in Größe der fertigen Dateien ein; Video- und Audiodateien werden im ZIP nicht nochmals komprimiert. Pro Frame-Dienst wird ein ZIP gleichzeitig erstellt. **Aus Verlauf entfernen** behält alle heruntergeladenen Dateien. Unterbrochene Pakete können nach einem Neustart erneut versucht werden.
+
 ## Formate
 
 | Format | Gut geeignet für | Qualität und Hinweise |
@@ -75,6 +98,7 @@ Anschließend Frame erneut starten. Neue Frame-Anwendungsversionen werden separa
 
 | Problem | Das hilft |
 | --- | --- |
+| Start.command schließt sich ohne Browser | Python 3.11+ und Node.js 22+ müssen auf diesem Rechner vorhanden sein. Eine neue ZIP enthält die lokale Laufzeit eines anderen Rechners bewusst nicht. |
 | Python oder Node.js fehlt | Die oben verlinkten Programme installieren und das Startfenster neu öffnen. |
 | YouTube lehnt einen Abruf ab | Download-Werkzeuge aktualisieren und erneut versuchen. Manche Videos bleiben aufgrund von YouTube-Beschränkungen nicht verfügbar. |
 | Anmeldung erforderlich | Private, Mitglieder- oder altersbeschränkte Videos werden ohne Anmeldung nicht unterstützt. Frame liest keine Browser-Cookies. |
@@ -104,7 +128,7 @@ node --check web/app.js
 python tools/package.py
 ```
 
-Der letzte Befehl erzeugt `dist/Frame-v2.0.0.zip` mit SHA-256-Prüfsumme. Runtime, Downloads, Git-Metadaten und persönliche Einstellungen sind ausgeschlossen. GitHub Actions führt die Prüfungen unter macOS, Windows und Linux aus, sobald das Projekt hochgeladen wird.
+Der letzte Befehl erzeugt `dist/Frame-v2.2.0.zip` mit SHA-256-Prüfsumme. Runtime, Downloads, Git-Metadaten und persönliche Einstellungen sind ausgeschlossen. GitHub Actions führt die Prüfungen unter macOS, Windows und Linux aus, sobald das Projekt hochgeladen wird.
 
 ### Konfiguration
 

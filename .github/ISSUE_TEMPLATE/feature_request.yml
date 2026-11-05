@@ -1,0 +1,11 @@
+name: Idee vorschlagen
+description: Eine Verbesserung für Frame vorschlagen.
+title: "[Idee] "
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Was möchtest du erreichen?
+      description: Beschreibe den Anwendungsfall und die gewünschte Verbesserung.
+    validations:
+      required: true

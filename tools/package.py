@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from formats import VERSION
 
-ROOT_FILES = {"server.py", "formats.py", "start.py", "requirements.txt", "Start.command", "Aktualisieren.command", "Start.bat", "Aktualisieren.bat", "Start.sh", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", ".gitignore", ".gitattributes", ".editorconfig"}
-SOURCE_DIRS = {"web", "docs", "tests", "tools", ".github"}
+ROOT_FILES = {"server.py", "formats.py", "start.py", "desktop.py", "runtime_setup.py", "requirements.txt", "requirements-build.txt", "Start.command", "Aktualisieren.command", "Start.bat", "Aktualisieren.bat", "Start.sh", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", ".gitignore", ".gitattributes", ".editorconfig"}
+SOURCE_DIRS = {"web", "docs", "tests", "tools", "resources", ".github"}
 
 
 def source_files(root=ROOT):

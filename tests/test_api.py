@@ -9,6 +9,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 import server
+from formats import VERSION
 
 
 class ApiTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class ApiTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory()
         server.DATA = Path(cls.temp.name)
         server.JOBS.clear()
+        server.BATCHES.clear()
         cls.http = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         server.PORT = cls.http.server_address[1]
         cls.base = f"http://127.0.0.1:{server.PORT}"
@@ -42,7 +44,7 @@ class ApiTests(unittest.TestCase):
         with self.request("/api/health") as r:
             result = json.load(r)
             self.assertEqual(len(result["formats"]), 8)
-            self.assertEqual(result["version"], "2.0.0")
+            self.assertEqual(result["version"], VERSION)
         with self.request("/") as r:
             self.assertEqual(r.status, 200)
             self.assertIn(b"Nur Audio", r.read())

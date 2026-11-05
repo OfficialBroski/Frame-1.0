@@ -1,0 +1,26 @@
+{
+  "darwin-arm64": {
+    "url": "https://files.pythonhosted.org/packages/2b/47/9f9b654f853598bae0850fa22bba168103e45d31b5a2a893ed474f28d54a/imageio_ffmpeg-0.8.1-py3-none-macosx_12_0_arm64.whl",
+    "sha256": "5636d691e36e5274b13fe38182b1f627b2e35dcecc63944012c2470f9484fc45",
+    "size": 22625474,
+    "version": "0.8.1"
+  },
+  "darwin-x64": {
+    "url": "https://files.pythonhosted.org/packages/da/24/2c3a7c69453bfb8374ddbbb5007346bad4a4247bc86882f3521cd615f929/imageio_ffmpeg-0.8.1-py3-none-macosx_10_13_x86_64.whl",
+    "sha256": "9538a10e598257263b5de1a1c1b86e7603417bc219245b1e279b452e5e48cc20",
+    "size": 26974382,
+    "version": "0.8.1"
+  },
+  "linux-x64": {
+    "url": "https://files.pythonhosted.org/packages/de/0f/49292fbef69ee10ebcf97bb741602521caafcc6966d5fa1a2b868cc15655/imageio_ffmpeg-0.8.1-py3-none-manylinux_2_28_x86_64.whl",
+    "sha256": "050d6850601c3b3890bd2b28306f3b842b3daea390a561101174375a1c460bda",
+    "size": 67998402,
+    "version": "0.8.1"
+  },
+  "win32-x64": {
+    "url": "https://files.pythonhosted.org/packages/82/0c/a1d49f3dd2688bd750b4986f8e271ad11f8e729a896070ea25f587b44da8/imageio_ffmpeg-0.8.1-py3-none-win_amd64.whl",
+    "sha256": "f27ca4cb85e2d4946deedbce1a81245dfd942a2bcf94b53676fb3956aa95bf1b",
+    "size": 38893483,
+    "version": "0.8.1"
+  }
+}

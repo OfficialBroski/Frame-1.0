@@ -8,7 +8,7 @@ Das Projekt ist zur Weitergabe als lokale Anwendung vorbereitet. Nutzer laden es
 2. **File → Add Local Repository** wählen und den Ordner **Frame** auswählen, in dem `README.md` und `server.py` liegen.
 3. Falls noch kein Repository vorhanden ist, über den angebotenen Link ein Repository in diesem Ordner erstellen. Keine vorhandenen Projektdateien überschreiben.
 4. Die Dateiliste prüfen. `.runtime`, `downloads` und `frame.local.json` werden automatisch ignoriert. Es sollten nur Quellcode, Dokumentation und `.github`-Dateien erscheinen.
-5. Einen ersten Commit erstellen, etwa mit „Frame 2.0: local video and audio downloader“ als Beschreibung.
+5. Einen ersten Commit erstellen, etwa mit „Frame 2.2: local video and audio downloader“ als Beschreibung.
 6. **Publish repository** wählen. Als Namen zum Beispiel `frame-downloader` verwenden. Für eine öffentliche Veröffentlichung „Keep this code private“ abwählen und veröffentlichen.
 7. Im neuen GitHub-Repository unter **Actions** die Prüfung „Checks“ ansehen. Das Ergebnis wird nach dem ersten Push angezeigt.
 
@@ -24,7 +24,7 @@ git init -b main
 
 git add .
 git status --short
-git commit -m "Frame 2.0: local video and audio downloader"
+git commit -m "Frame 2.2: local video and audio downloader"
 git remote add origin https://github.com/DEIN-NAME/DEIN-REPO.git
 git push -u origin main
 ```
@@ -33,18 +33,18 @@ Git muss mit deinem eigenen Namen und deiner bevorzugten Commit-E-Mail eingerich
 
 ## Einen Download unter Releases anbieten
 
-Ein Release-ZIP ist für Endnutzer einfacher als das Klonen des Quellcodes.
+Die Desktop-Downloads enthalten die fertige App. Der Release-Workflow baut macOS Apple Silicon, macOS Intel, Windows x64 und Linux x64 und hängt deren Archive sowie den Quellcode an einen Release-Entwurf an. Details: [DESKTOP-BUILD.md](DESKTOP-BUILD.md).
 
 ### Über den vorbereiteten Workflow
 
 Nachdem die Tests erfolgreich sind und die Versionsnummer in `formats.py` stimmt:
 
 ```sh
-git tag v2.0.0
-git push origin v2.0.0
+git tag v2.2.0
+git push origin v2.2.0
 ```
 
-Der Workflow **Release** prüft das Projekt, erstellt das ZIP und die SHA-256-Prüfsumme und legt anschließend einen **Release-Entwurf** an. Unter **Releases** den Entwurf ansehen und selbst veröffentlichen. Die ZIP enthält die Starter und sämtliche nötigen Quelldateien, aber keine persönlichen Medien oder Laufzeitprogramme.
+Der Workflow **Release** prüft das Projekt, erstellt das ZIP und die SHA-256-Prüfsumme und legt anschließend einen **Release-Entwurf** an. Unter **Releases** den Entwurf ansehen und selbst veröffentlichen. Das Quellcode-ZIP enthält Starter und Quelldateien. Zusätzlich werden vier fertige App-Archive erstellt. Persönliche Medien, Verlauf und lokale Einstellungen sind ausgeschlossen.
 
 Der Workflow verwendet das von GitHub automatisch bereitgestellte Repository-Token. Für normale Repositories ist kein zusätzlich angelegtes Secret erforderlich. Organisationsrichtlinien können Actions oder Schreibrechte einschränken; in diesem Fall die manuelle Variante verwenden.
 
@@ -54,7 +54,7 @@ Der Workflow verwendet das von GitHub automatisch bereitgestellte Repository-Tok
 python3 tools/package.py
 ```
 
-Unter **Releases → Draft a new release** den Tag `v2.0.0` auswählen oder anlegen. `dist/Frame-v2.0.0.zip` und `dist/Frame-v2.0.0.zip.sha256` anhängen, Änderungen aus `CHANGELOG.md` übernehmen und veröffentlichen.
+Unter **Releases → Draft a new release** den Tag `v2.2.0` auswählen oder anlegen. `dist/Frame-v2.2.0.zip` und `dist/Frame-v2.2.0.zip.sha256` anhängen, Änderungen aus `CHANGELOG.md` übernehmen und veröffentlichen.
 
 ## Repository-Seite verständlich machen
 

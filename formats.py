@@ -1,7 +1,7 @@
 """Download format catalog, request validation and yt-dlp configuration."""
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "2.2.0"
 FORMATS = [
     {"id": "mp4", "kind": "video", "label": "MP4", "description": "Video + Audio · vielseitig abspielbar"},
     {"id": "mkv", "kind": "video", "label": "MKV", "description": "Video + Audio · flexibel für moderne Codecs"},

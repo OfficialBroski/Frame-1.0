@@ -1273,3 +1273,22 @@ dialog h2 {
     scroll-behavior:auto!important
   }
 }
+
+/* Package downloads */
+.download-scope { max-width:360px; margin-bottom:18px; }
+.batch-intro,.batch-muted { color:#8792a2; font-size:11px; line-height:1.7; }
+#batch-urls { display:block; width:100%; resize:vertical; min-height:145px; max-height:520px; border:1px solid #353d47; border-radius:8px; background:#101519; color:var(--ink); padding:15px; font:12px/1.9 ui-monospace,monospace; }
+#batch-urls::placeholder { color:#627182; }
+#batch-urls:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.batch-input-meta { display:flex; justify-content:space-between; align-items:center; gap:15px; margin:9px 0 22px; color:#8792a2; font-size:10px; }
+.batch-options-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+.batch-history { margin-bottom:18px; }
+.batch-card { border:1px solid #35483c; border-radius:10px; background:var(--surface); padding:18px; min-width:0; }
+.batch-card h3 { font-size:13px; margin:0 0 8px; font-weight:550; }
+.batch-card .job-actions { flex-wrap:wrap; margin-top:13px; padding:0; }
+.batch-card details { margin-top:15px; border-top:1px solid var(--line); padding-top:12px; }
+.batch-card summary { cursor:pointer; font-size:11px; color:#93b6a1; }
+.batch-card details>.jobs-list { margin-top:14px; max-height:560px; overflow:auto; }
+.batch-card .job-card { background:#11171a; }
+.batch-status { margin:9px 0 0; color:#c4d4ca; font-size:11px; line-height:1.7; }
+@media(max-width:600px) { .batch-options-grid { grid-template-columns:1fr; } .download-scope { max-width:none; } .batch-card { padding:14px; } .batch-muted { font-size:9px; } }
